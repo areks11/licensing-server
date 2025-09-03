@@ -1,35 +1,39 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
+const { Client } = require('pg'); // ZMIANA: Importujemy nową bibliotekę
 const crypto = require('crypto');
 
 const app = express();
-const port = process.env.PORT || 3001; // Hosting ustawi port w zmiennej środowiskowej PORT
-const dbFile = './licenses.db';
-
-// Middleware do odczytywania JSON z ciała zapytania
+const port = process.env.PORT || 3001;
 app.use(express.json());
 
-const db = new sqlite3.Database(dbFile, (err) => {
-  if (err) {
-    return console.error('Błąd podczas łączenia z bazą danych:', err.message);
+// --- POŁĄCZENIE Z BAZĄ DANYCH POSTGRES ---
+const db = new Client({
+  // WAŻNE: Wklejony Twój unikalny adres z Render
+  connectionString: "postgresql://areks11_ttl_database_user:5gtfGoIynzKUqbLDyrOCHzkI3T0E82Em@dpg-d2s10lbe5dus73clmjtg-a/areks11_ttl_database", 
+  ssl: {
+    rejectUnauthorized: false
   }
-  console.log('Połączono z bazą danych SQLite.');
-  
-  db.run(`
-    CREATE TABLE IF NOT EXISTS licenses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      license_key TEXT NOT NULL UNIQUE,
-      expires_at INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active'
-    )
-  `, (err) => {
-    if (err) return console.error('Błąd podczas tworzenia tabeli:', err.message);
-    console.log('Tabela "licenses" jest gotowa.');
-  });
 });
 
+db.connect()
+  .then(() => console.log('Połączono z bazą danych PostgreSQL.'))
+  .then(() => {
+    // Upewniamy się, że tabela na licencje istnieje
+    return db.query(`
+      CREATE TABLE IF NOT EXISTS licenses (
+        id SERIAL PRIMARY KEY,
+        license_key TEXT NOT NULL UNIQUE,
+        expires_at BIGINT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active'
+      )
+    `);
+  })
+  .then(() => console.log('Tabela "licenses" jest gotowa.'))
+  .catch(err => console.error('Błąd połączenia lub tworzenia tabeli:', err.stack));
+
+
 // Endpoint do generowania nowego klucza licencyjnego
-app.get('/generate-license/:days', (req, res) => {
+app.get('/generate-license/:days', async (req, res) => {
   const days = parseInt(req.params.days, 10);
   if (isNaN(days) || days <= 0) {
     return res.status(400).json({ error: 'Nieprawidłowa liczba dni' });
@@ -38,64 +42,58 @@ app.get('/generate-license/:days', (req, res) => {
   const newKey = crypto.randomBytes(16).toString('hex');
   const expirationDate = Date.now() + (days * 24 * 60 * 60 * 1000);
 
-  const sql = `INSERT INTO licenses (license_key, expires_at) VALUES (?, ?)`;
+  const sql = `INSERT INTO licenses (license_key, expires_at) VALUES ($1, $2)`;
   
-  db.run(sql, [newKey, expirationDate], function(err) {
-    if (err) {
-      console.error('Błąd podczas zapisywania klucza do bazy:', err.message);
-      return res.status(500).json({ error: 'Błąd serwera podczas generowania klucza' });
-    }
-    
+  try {
+    await db.query(sql, [newKey, expirationDate]);
     console.log(`Wygenerowano i zapisano nowy klucz: ${newKey}`);
     res.json({
       message: `Wygenerowano nowy klucz licencyjny ważny przez ${days} dni.`,
       key: newKey
     });
-  });
+  } catch (err) {
+    console.error('Błąd podczas zapisywania klucza do bazy:', err.message);
+    res.status(500).json({ error: 'Błąd serwera podczas generowania klucza' });
+  }
 });
 
-// === NOWY FRAGMENT KODU ===
 // Endpoint do weryfikacji klucza licencyjnego
-app.post('/verify-license', (req, res) => {
+app.post('/verify-license', async (req, res) => {
   const { key } = req.body;
-
   if (!key) {
     return res.status(400).json({ valid: false, message: 'Nie dostarczono klucza licencyjnego.' });
   }
 
-  const sql = `SELECT * FROM licenses WHERE license_key = ?`;
+  const sql = `SELECT * FROM licenses WHERE license_key = $1`;
 
-  db.get(sql, [key], (err, row) => {
-    if (err) {
-      console.error('Błąd podczas sprawdzania klucza:', err.message);
-      return res.status(500).json({ valid: false, message: 'Błąd serwera.' });
-    }
+  try {
+    const { rows } = await db.query(sql, [key]);
+    const row = rows[0];
 
     if (!row) {
       return res.status(404).json({ valid: false, message: 'Klucz licencyjny nie został znaleziony.' });
     }
-
     if (row.status !== 'active') {
         return res.status(403).json({ valid: false, message: 'Licencja nie jest aktywna.' });
     }
-
     const now = Date.now();
     if (row.expires_at < now) {
       return res.status(403).json({ valid: false, message: 'Licencja wygasła.' });
     }
 
-    // Jeśli wszystko się zgadza, licencja jest ważna
     res.json({
       valid: true,
       message: 'Licencja jest aktywna i poprawna.',
-      expires_at: new Date(row.expires_at).toISOString()
+      expires_at: new Date(parseInt(row.expires_at)).toISOString()
     });
-  });
+  } catch (err) {
+    console.error('Błąd podczas sprawdzania klucza:', err.message);
+    res.status(500).json({ valid: false, message: 'Błąd serwera.' });
+  }
 });
-// === KONIEC NOWEGO FRAGMENTU KODU ===
 
 app.get('/', (req, res) => {
-  res.send('Serwer licencyjny działa i jest połączony z bazą danych!');
+  res.send('Serwer licencyjny działa i jest połączony z bazą danych PostgreSQL!');
 });
 
 app.listen(port, () => {
