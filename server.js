@@ -33,11 +33,14 @@ db.connect()
         id SERIAL PRIMARY KEY,
         license_key TEXT NOT NULL UNIQUE,
         expires_at BIGINT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active',
-        device_id TEXT NULL
+        status TEXT DEFAULT 'active',
+        device_id TEXT
       )
     `);
   })
+  // MIGRACJE OCHRONNE: jeśli tabela powstała w starej wersji bez kolumn — dołóż je
+  .then(() => db.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`))
+  .then(() => db.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS device_id TEXT`))
   .then(() => console.log('Tabela "licenses" jest gotowa.'))
   .catch(err => console.error('Błąd połączenia lub tworzenia tabeli:', err.stack));
 
