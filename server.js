@@ -7,7 +7,7 @@ const port = process.env.PORT || 3001;
 app.use(express.json());
 
 const db = new Client({
-  connectionString: "postgresql://areks11_ttl_database_user:5gtfGoIynzKUqbLDyrOCHzkI3T0E82Em@dpg-d2s10lbe5dus73clmjtg-a/areks11_ttl_database",
+  connectionString: "postgresql://areks11_ttl_database_user:5gtfGoIynzKUqbLDyrOCHzkI3T0E82Em@dpg-d2s10lbe5dus73clmjtg-a.postgres.render.com/areks11_ttl_database",
   ssl: {
     rejectUnauthorized: false
   }
@@ -72,12 +72,25 @@ app.post('/verify-license', async (req, res) => {
   const sqlSelect = `SELECT * FROM licenses WHERE license_key = $1`;
 
   try {
+    // LOG: co przyszło
+    console.log('[VERIFY] key=', key, ' incomingDeviceId=', deviceId);
+
     const { rows } = await db.query(sqlSelect, [key]);
     const row = rows[0];
 
     if (!row) {
+      console.warn('[VERIFY] key not found');
       return res.status(404).json({ valid: false, message: 'Klucz licencyjny nie został znaleziony.' });
     }
+
+    // LOG: co mamy w bazie
+    console.log('[VERIFY] dbRow=', {
+      status: row.status,
+      expires_at: row.expires_at,
+      device_id: row.device_id,
+      device_id_type: typeof row.device_id
+    });
+
     if (row.status !== 'active') {
       return res.status(403).json({ valid: false, message: 'Licencja nie jest aktywna.' });
     }
@@ -85,12 +98,14 @@ app.post('/verify-license', async (req, res) => {
       return res.status(403).json({ valid: false, message: 'Licencja wygasła.' });
     }
 
-    if (row.device_id === null) {
+    // UZNAJEMY ZA "NIEPRZYPISANE", jeśli device_id jest null/undefined/pusty string
+    const unbound = row.device_id === null || row.device_id === undefined || row.device_id === '';
+    if (unbound) {
       const sqlUpdate = `UPDATE licenses SET device_id = $1 WHERE license_key = $2`;
       await db.query(sqlUpdate, [deviceId, key]);
-      console.log(`Klucz ${key} został pomyślnie przypisany do urządzenia ${deviceId}`);
+      console.log(`[VERIFY] Bound key to device. key=${key} deviceId=${deviceId}`);
     } else if (row.device_id !== deviceId) {
-      console.warn(`Próba aktywacji klucza ${key} na nowym urządzeniu ${deviceId}. Klucz jest już przypisany do ${row.device_id}.`);
+      console.warn(`[VERIFY] Device mismatch. key=${key} incoming=${deviceId} bound=${row.device_id}`);
       return res.status(403).json({ valid: false, message: 'Ten klucz licencyjny jest już używany na innym urządzeniu.' });
     }
     
