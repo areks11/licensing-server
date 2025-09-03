@@ -6,12 +6,24 @@ const app = express();
 const port = process.env.PORT || 3001;
 app.use(express.json());
 
+// Wybierz connection string: ENV (Render) albo fallback (External)
+const CONNECTION_STRING = process.env.DATABASE_URL || "postgresql://areks11_ttl_database_user:5gtfGoIynzKUqbLDyrOCHzkI3T0E82Em@dpg-d2s10lbe5dus73clmjtg-a.postgres.render.com/areks11_ttl_database";
+
+// Bezpieczny log (tylko host, bez hasła), pomoże sprawdzić czy używa ENV czy fallbacku
+try {
+  const { hostname } = new URL(CONNECTION_STRING);
+  console.log('[BOOT] DB host:', hostname, process.env.DATABASE_URL ? '(ENV)' : '(fallback EXTERNAL)');
+} catch (e) {
+  console.warn('[BOOT] Could not parse DB URL');
+}
+
 const db = new Client({
-  connectionString: "postgresql://areks11_ttl_database_user:5gtfGoIynzKUqbLDyrOCHzkI3T0E82Em@dpg-d2s10lbe5dus73clmjtg-a.postgres.render.com/areks11_ttl_database",
+  connectionString: CONNECTION_STRING,
   ssl: {
     rejectUnauthorized: false
   }
 });
+
 
 db.connect()
   .then(() => console.log('Połączono z bazą danych PostgreSQL.'))
