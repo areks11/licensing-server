@@ -32,30 +32,50 @@ db.connect()
   .catch(err => console.error('Błąd połączenia lub tworzenia tabeli:', err.stack));
 
 
-// Endpoint do generowania nowego klucza licencyjnego
-app.get('/generate-license/:days', async (req, res) => {
-  const days = parseInt(req.params.days, 10);
-  if (isNaN(days) || days <= 0) {
-    return res.status(400).json({ error: 'Nieprawidłowa liczba dni' });
-  }
+// Endpoint do generowania kluczy na DNI
+app.get('/generate-license/days/:value', async (req, res) => {
+  const days = parseInt(req.params.value, 10);
+  if (isNaN(days)) return res.status(400).json({ error: 'Nieprawidłowa liczba dni' });
 
-  const newKey = crypto.randomBytes(16).toString('hex');
   const expirationDate = Date.now() + (days * 24 * 60 * 60 * 1000);
+  generateAndSaveKey(res, expirationDate, `${days} dni`);
+});
 
+// Endpoint do generowania kluczy na GODZINY
+app.get('/generate-license/hours/:value', async (req, res) => {
+  const hours = parseInt(req.params.value, 10);
+  if (isNaN(hours)) return res.status(400).json({ error: 'Nieprawidłowa liczba godzin' });
+
+  const expirationDate = Date.now() + (hours * 60 * 60 * 1000);
+  generateAndSaveKey(res, expirationDate, `${hours} godzin`);
+});
+
+// Endpoint do generowania kluczy na MINUTY
+app.get('/generate-license/minutes/:value', async (req, res) => {
+  const minutes = parseInt(req.params.value, 10);
+  if (isNaN(minutes)) return res.status(400).json({ error: 'Nieprawidłowa liczba minut' });
+
+  const expirationDate = Date.now() + (minutes * 60 * 1000);
+  generateAndSaveKey(res, expirationDate, `${minutes} minut`);
+});
+
+// Wspólna funkcja pomocnicza do generowania i zapisywania kluczy
+async function generateAndSaveKey(res, expirationDate, durationText) {
+  const newKey = crypto.randomBytes(16).toString('hex');
   const sql = `INSERT INTO licenses (license_key, expires_at) VALUES ($1, $2)`;
   
   try {
     await db.query(sql, [newKey, expirationDate]);
     console.log(`Wygenerowano i zapisano nowy klucz: ${newKey}`);
     res.json({
-      message: `Wygenerowano nowy klucz licencyjny ważny przez ${days} dni.`,
+      message: `Wygenerowano nowy klucz licencyjny ważny przez ${durationText}.`,
       key: newKey
     });
   } catch (err) {
     console.error('Błąd podczas zapisywania klucza do bazy:', err.message);
     res.status(500).json({ error: 'Błąd serwera podczas generowania klucza' });
   }
-});
+}
 
 // Endpoint do weryfikacji klucza licencyjnego
 app.post('/verify-license', async (req, res) => {
